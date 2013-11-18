@@ -60,6 +60,7 @@ EXAMPLES = '''
 import os
 import tempfile
 import fileinput
+import syslog
 
 class Host(object):
 
@@ -73,9 +74,17 @@ class Host(object):
         self.aliases            = module.params['aliases']
 
         self._ip_matches        = False
+        self._ip_version_matches = False
         self._hostname_matches  = False
         self._aliases_matches   = False
         self._found_on_line     = -1
+
+    def _get_ip_version(self, ip):
+        if '.' in ip:
+            return 4
+        if ':' in ip:
+            return 6
+        return None
 
     def validate_has_hostname_on_present(self):
         err = ''
@@ -102,20 +111,22 @@ class Host(object):
             if line.startswith("#") or line.startswith("\n"):
                 continue
 
-            ip = line.split()[0:1]
-            hostname = line.split()[1:2]
+            ip  = ''.join(line.split()[0:1])
+            hostname = ''.join(line.split()[1:2])
             aliases = ','.join(line.split()[2:])
 
-            if self.ip and self.ip in ip: 
+            if self.ip and (self.ip == ip): 
                 self._ip_matches = True
                 self._found_on_line = lineno
 
-            if self.hostname and self.hostname in hostname:
+            self._ip_version_matches = self._ip_matches or (self._get_ip_version(ip) == self._get_ip_version(self.ip)):
+
+            if self.hostname and (self.hostname == hostname):
                 self._hostname_matches = True
                 self._found_on_line = lineno
 
             # only look at aliases if we found hostname or ip
-            if self._hostname_matches or self._ip_matches:
+            if (self._hostname_matches and self._ip_version_matches) or self._ip_matches:
                 if self.aliases == aliases:
                     self._aliases_matches = True
                 break
@@ -124,7 +135,7 @@ class Host(object):
         return self._ip_matches and self._hostname_matches and self._aliases_matches
 
     def entry_exists(self):
-        return self._ip_matches or self._hostname_matches
+        return self._ip_matches or (self._hostname_matches and self._ip_version_matches)
 
     def remove_entry(self):
         self._hostsfile_lines.pop(self._found_on_line)
